@@ -77,7 +77,13 @@
 
         Notons que les densités présentes dans la première expression de ELBO sont toutes connues, et puisque la divergence de Kullback-Leibler est toujours positive, on a $\log(p_\theta(x)) \geq \mathcal{L}_{(\theta, \phi)}(x)$ : ces deux observations justifient le nom d'ELBO. Par ailleurs, remarquons que, puisque $\mathcal{L}_{(\theta, \phi)}(x) = \log(p_\theta(x)) - D_{KL}(q_\phi(z | x) \| p_\theta(z | x))$, maximiser l'ELBO vis à vis de $\theta$ et $\phi$ revient d'autre part à un calcul de maximum de vraissemblance sur $\theta$ mais d'autre part à l'apprentissage de l'encodeur $q_\phi(z | x)$ approximant la distribution a posteriori $p_\theta(z | x)$.
     \subsection{Astuce de reparamétrisation et fonction de perte}
-
+        
+        Il existe des méthodes d'optimisation standard pour maximiser ou minimiser des fonctions de la forme $J: \psi \mapsto \mathbb{E}_{z \sim p}[j(\psi,z)]$, on pense notamment aux algorithmes de descente de gradient stochastique (SGD) ou adaptative moment estimation (ADAM). On souhaiterais pouvoir appliquer de telles méthodes sur l'ELBO, avec la fonction $J: (\theta, \phi) \mapsto \mathcal{L}_{(\theta, \phi)}(x)$, mais la dépendance de la distribution en $\phi$ de la distribution de $q_\phi(z | x)$ qui génère l'espérence pose problème. \\
+        Le succès des autoencoders variationnels repose sur l'utilisation d'une \textit{astuce de reparamétrisation} (plus couramment \textit{reparametrization trick} en anglais) qui permet de contourner ce problème. Cette astuce consiste à supposer qu'il existe une transformation $g$ et une variable aléatoire $\epsilon$ de loi $\pi$ telle que si $z = g(\phi, x, \epsilon)$, alors $z \sim q_\phi(z | x)$. De cette manière, on peut écrire l'ELBO sous la forme suivante : 
+        \begin{equation}
+            \mathcal{L}_{(\theta, \phi)}(x) = \mathbb{E}_{\epsilon \sim \pi} \left[ \log(p_\theta(x, g(\phi, x, \epsilon))) - \log(q_\phi(g(\phi, x, \epsilon) | x)) \right]
+        \end{equation}
+        et alors les algorithmes d'optimisation stochastiques peuvent être appliqués. Un exemple courant est que si $q_\phi(z | x) = \mathcal{N}(z | \mu_\phi(x), \Sigma_\phi(x))$, on peut alors choisir $\epsilon \sim \mathcal{N}(0, I)$ et $g : \phi, x, \epsilon \mapsto \mu_\phi(x) + \Sigma_\phi(x)^{1/2} \epsilon$.
     \subsection{Architecture des encodeurs et decodeurs}
 
 \section*{Bibliographie}

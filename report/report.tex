@@ -21,7 +21,7 @@
 % Title
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\title{\textbf{Alternatives au prior Gaussien pour les modèles Variationnels}}
+\title{\textbf{Alternatives au prior Gaussien pour les autoencoders variationnels}}
 \date{Novembre 2025}
 \author{Abel Verley}
 
@@ -35,12 +35,51 @@
 
 \section{Intoduction}
 
-\section{Modèles variationnels et borne ELBO}
+\section{Présentation des autoencoders variationnels}
 
-    \subsection{Modèle statistique}
+    \subsection{Formulation statistique des modèles variationnels}
+        Soit $(\mathbb{R}^d, \mathcal{B}(\mathbb{R}^d), (p_\theta)_{\theta \in \Theta})$ un modèle statistique dominé par la mesure de Lebesgue. Dans le cadre des \textit{modèles variationnels}, on suppose l'existence d'un \textit{espace latent} $\mathcal{Z} \subseteq \mathbb{R}^m$ de petite dimension équipé d'une densité de probabilité $q$ indépendante de $\theta$ telle que 
+        \begin{equation}
+            p_\theta(x) = \int p_\theta(x | z) q(z) dz
+        \end{equation}
 
-    \subsection{Borne ELBO}
+        où typiquement $p_\theta(x | z)$ a une forme particulièrement simple (e.g. $\mathcal{N}(x | \mu_\theta(z), \Sigma_\theta(z))$). Plus intuitevement, on suppose dans les modèles variationnels que la variable observée $x$ de grande dimension est expliquée par de l'information plus concise contenue dans l'espace latent $z$. La densité $q$ est appelée \textit{prior} sur l'espace latent tandis que $p_\theta(x | z)$ est appelée \textit{decodeur} (dans le sens où il décode l'information contenue dans l'espace latent pour reconstruire la variable observée). La distribution \textit{a posteriori} $p_\theta(z | x)$ est donnée par l'équation suivante.
 
-    \subsection{Astuce de reparamétrisation}
+        \begin{equation}
+            p_\theta(z | x) = \frac{p_\theta(x | z) q(z)}{\int p_\theta(x | z) q(z) dz}
+        \end{equation}
+        
+        L'intégrale au dénominateur de cette expression n'est généralement pas calculable en forme close, et n'est pas accessible numériquement en grande dimension. De même, la \textit{vraisemblance} $p_\theta(x)$ n'est pas accessible numériquement en grande dimension. Les \textit{autoencoders variationnels} proposent d'introduire une approximation $q_\phi(z | x)$ de la distribution a posteriori $p_\theta(z | x)$ qu'on appelle \textit{encodeur}. \\
+
+        L'intéret de ce modèle est double : premièrement, à l'aide de l'encodeur, il permet une réduction de dimension de la variable observée $x$, de sorte à effectuer du traitement dans l'espace latent (e.g du clustering) ; deuxièmement, à l'aide du decodeur, les autoencoders variationnels consituent un modèle génératif de la variable observée $x$.
+
+        
+    \subsection{Autoencoders variationnels et borne ELBO}
+        Une approche bien souvent utilisée en estimation paramétrique est l'estimation du maximum de vraissemblance (MLE). Elle consiste, étant donnée un échantillon i.i.d. $(x_i)_{i=1, \dots n}$ d'une distribution $p_{\theta^*}$ et sous réserve d'existence, à estimer $\theta^*$ par
+        \begin{equation}
+            \hat{\theta} \in \arg\max_{\theta \in \Theta} \sum_{i=1}^n \log p_{\theta}(x_i)
+        \end{equation}
+
+        
+        Dans \textit{autoencoders variationnels} (VAE) les distributions $q_\phi(z | x)$ et $p_\theta(x | z)$ introduites ci-dessus sont généralement paramétrées par des réseaux de neurones profonds de paramètres respectifs $\phi \in \Phi$ et $\theta \in \Theta$.  Comme expliqué précédemment, la fonction de vraissemblance n'est pas accessible, et par conséquent l'estimation du maximum de vraissemblance n'est pas possible. On peut cependant faire apparaitre la décomposition suivante de la log-vraissemblance, sous reserve que toutes les densités soient strictement positives :\\
+
+        \begin{align*}
+            \log(p_\theta(x)) &= \mathbb{E}_{z \sim q_\phi(z | x)} \left[ \log\left( \frac{p_\theta(x)p_\theta(z | x)q_\phi(z | x)}{p_\theta(z | x)q_\phi(z | x)} \right) \right] \\ 
+                            &= \mathbb{E}_{z \sim q_\phi(z | x)} \left[\log(\frac{p_\theta(x)p_\theta(x | z)q(z)}{p_\theta(x)q_\phi(z | x)}) \right] + D_{KL}(q_\phi(z | x) \| p_\theta(z | x)) \\
+                        &= \mathbb{E}_{z \sim q_\phi(z | x)} \left[\log(p_\theta(z |x))\right] - D_{KL}(q_\phi(z | x) \| q(z)) + D_{KL}(q_\phi(z | x) \| p_\theta(z | x))
+        \end{align*}
+
+        On appelle \textit{evidence lower bound} (ELBO) la quantité :
+        \begin{align*}
+            \mathcal{L}_{(\theta, \phi)}(x) &= \mathbb{E}_{z \sim q_\phi(z | x)} \left[\log(p_\theta(z |x))\right] - D_{KL}(q_\phi(z | x) \| q(z)) \\
+            &= \mathbb{E}_{z \sim q_\phi(z | x)} \left[\log(p_\theta(x, z))- \log(q_\phi(z | x))\right] 
+        \end{align*}
+
+        Notons que les densités présentes dans la première expression de ELBO sont toutes connues, et puisque la divergence de Kullback-Leibler est toujours positive, on a $\log(p_\theta(x)) \geq \mathcal{L}_{(\theta, \phi)}(x)$ : ces deux observations justifient le nom d'ELBO. Par ailleurs, remarquons que, puisque $\mathcal{L}_{(\theta, \phi)}(x) = \log(p_\theta(x)) - D_{KL}(q_\phi(z | x) \| p_\theta(z | x))$, maximiser l'ELBO vis à vis de $\theta$ et $\phi$ revient d'autre part à un calcul de maximum de vraissemblance sur $\theta$ mais d'autre part à l'apprentissage de l'encodeur $q_\phi(z | x)$ approximant la distribution a posteriori $p_\theta(z | x)$.
+    \subsection{Astuce de reparamétrisation et fonction de perte}
+
+    \subsection{Architecture des encodeurs et decodeurs}
+
+\section*{Bibliographie}
 
 \end{document}

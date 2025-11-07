@@ -247,3 +247,6 @@ latexmkrc
 
 # macOS
 .DS_Store
+
+# Data
+data/

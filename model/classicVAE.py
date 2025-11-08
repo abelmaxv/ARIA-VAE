@@ -51,8 +51,8 @@ class ClassicVAE(nnx.Module):
         self.decoder = Decoder(latent_dim=latent_dim, hidden_dim=hidden_dim, out_dim=in_dim, rngs=rngs)
 
     def __call__(self, x: jnp.ndarray, *, rngs: nnx.Rngs) -> jnp.ndarray:
-        mu, logvar = self.encoder(x)
-        z = mu + jnp.exp(logvar)*jr.normal(self.rngs.params(), shape = (self.latent_dim,))
+        mu, log_sigma = self.encoder(x)
+        z = mu + jnp.exp(log_sigma)*jr.normal(self.rngs.params(), shape = (self.latent_dim,))
         return self.decoder(z)
     
     def generate(self,*, rngs: nnx.Rngs):
@@ -61,6 +61,14 @@ class ClassicVAE(nnx.Module):
         sample = jr.bernoulli(rngs.params(), p)
         return sample
 
+
+if __name__ == "__main__":
+    in_dim = 784
+    latent_dim = 64
+    hidden_dim = 128
+    rngs = nnx.Rngs(jax.random.PRNGKey(42))
+    model = ClassicVAE(in_dim = in_dim, latent_dim = latent_dim, hidden_dim = hidden_dim, rngs = rngs)
+    nnx.display(model)
 
 
 

@@ -1,1 +1,1 @@
-from . import classicVAE
+from .classicVAE import *

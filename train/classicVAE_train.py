@@ -1,13 +1,12 @@
 import sys
 from pathlib import Path
 
-from flax.nnx.graph import B
-
-# Add project root to Python path
+# # Add project root to Python path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from model.classicVAE import ClassicVAE
+from utils import image_to_jax1d, jax_collate_fn
 
 import jax
 import jax.numpy as jnp
@@ -18,6 +17,8 @@ import optax
 from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 import PIL
+
+from tqdm import tqdm
 
 
 # TO DO : 
@@ -75,7 +76,7 @@ class ClassicVAE_trainer:
         """
         for epoch in range(epochs): 
             key = rngs.params()
-            for batch in self.train_data_loader: 
+            for batch in tqdm(self.train_data_loader): 
                 key, subkey = jr.split(key)
                 self._train_step(batch, key = subkey, n_sample = n_sample)
                 # To be implemented
@@ -83,26 +84,13 @@ class ClassicVAE_trainer:
                 #     self._eval_step(batch)
         
 
-def image_to_jax1d(image: PIL.Image.Image) -> jnp.array:
-    image_jax = jnp.array(image.getdata()).reshape(image.width * image.height)
-    image_jax = jnp.where(image_jax > 128, 1.0, 0.0).astype(jnp.float32)
-    return image_jax
-
-def jax_collate_fn(batch):
-    """Custom collate function for JAX arrays"""
-    images, labels = zip(*batch)
-    # Stack JAX arrays into batched arrays and ensure float dtype
-    images_batch = jnp.stack(images, axis=0).astype(jnp.float32)
-    labels_batch = jnp.array(labels)
-    return images_batch, labels_batch
-
 
 if __name__ == "__main__":
 
     # Test if the methods run without errors
 
-    train_dataset = MNIST(root = "./data", train = True, download = True, transform = image_to_jax1d)
-    test_dataset = MNIST(root = "./data", train = False, download = True, transform = image_to_jax1d)
+    train_dataset = MNIST(root = "./../data", train = True, download = True, transform = image_to_jax1d)
+    test_dataset = MNIST(root = "./../data", train = False, download = True, transform = image_to_jax1d)
 
     train_data_loader = DataLoader(train_dataset, batch_size = 128, shuffle = True, collate_fn = jax_collate_fn)
     test_data_loader = DataLoader(test_dataset, batch_size = 128, shuffle = True, collate_fn = jax_collate_fn)
@@ -116,7 +104,6 @@ if __name__ == "__main__":
 
     model = ClassicVAE(in_dim = in_dim, latent_dim = latent_dim, hidden_dim = hidden_dim, rngs = rngs)
     optimizer = nnx.Optimizer(model, optax.adam(learning_rate))
-
     trainer = ClassicVAE_trainer(model, optimizer, train_data_loader=train_data_loader, test_data_loader=test_data_loader)
 
     trainer(epochs = epochs, rngs = rngs)

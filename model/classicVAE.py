@@ -53,7 +53,9 @@ class ClassicVAE(nnx.Module):
     def __call__(self, x: jnp.ndarray, *, rngs: nnx.Rngs) -> jnp.ndarray:
         mu, log_sigma = self.encoder(x)
         z = mu + jnp.exp(log_sigma)*jr.normal(self.rngs.params(), shape = (self.latent_dim,))
-        return self.decoder(z)
+        ps = self.decoder(z)
+        sample = jr.bernoulli(rngs.params(), ps)
+        return sample
     
     def generate(self,*, rngs: nnx.Rngs):
         z = jr.normal(rngs.params(), shape = (self.latent_dim,))

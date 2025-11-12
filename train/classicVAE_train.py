@@ -71,19 +71,17 @@ class ClassicVAE_trainer:
         # To be implemented with metrics
         pass
 
-    def __call__(self, epochs: int, n_sample : int = 10, *, rngs: nnx.Rngs):
-        """ Launch the training procedure
-        """
-        for epoch in range(epochs): 
+    def __call__(self, epochs: int, n_sample: int = 10, *, rngs: nnx.Rngs):
+        """Launch the training procedure."""
+        print(f"Training for {epochs} epochs...\n")
+
+        for epoch in tqdm(range(epochs), desc="Epochs"):
             key = rngs.params()
-            # Use vmap ? 
-            for batch in tqdm(self.train_data_loader): 
+            batch_iter = tqdm(self.train_data_loader, desc=f"Epoch {epoch+1}", leave=False)
+            for batch in batch_iter:
                 key, subkey = jr.split(key)
-                self._train_step(self.model, self.optimizer, batch, key = subkey, n_sample = n_sample)
-                # To be implemented
-                # if eval: 
-                #     self._eval_step(batch)
-        
+                self._train_step(self.model, self.optimizer, batch, key=subkey, n_sample=n_sample)
+            
 
 
 if __name__ == "__main__":
@@ -101,7 +99,7 @@ if __name__ == "__main__":
     hidden_dim = 128
     rngs = nnx.Rngs(jax.random.PRNGKey(42))
     learning_rate = 0.001
-    epochs = 1
+    epochs = 5
 
     model = ClassicVAE(in_dim = in_dim, latent_dim = latent_dim, hidden_dim = hidden_dim, rngs = rngs)
     optimizer = nnx.Optimizer(model, optax.adam(learning_rate))

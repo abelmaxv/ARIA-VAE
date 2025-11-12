@@ -20,10 +20,11 @@ import PIL
 
 from tqdm import tqdm
 
+from functools import partial
+
 
 # TO DO : 
 # - Implement nnx.metric
-# - Accelerate the training with jax.jit
 
 class ClassicVAE_trainer: 
     """_summary_
@@ -42,7 +43,6 @@ class ClassicVAE_trainer:
         """
 
         latent_dim = model.latent_dim
-        
 
         def loss_single(x: jnp.array, n_sample : int) -> jnp.array:
             mu_x, log_sigma_x = model.encoder(x)
@@ -59,12 +59,12 @@ class ClassicVAE_trainer:
         return jnp.mean(nnx.vmap(lambda image : loss_single(image, n_sample))(image_batch))
 
             
-
-    def _train_step(self, batch : tuple[jnp.array, jnp.array], *, key : jnp.array, n_sample : int):
+    @partial(nnx.jit, static_argnames = ["self", "n_sample"])
+    def _train_step(self, model: ClassicVAE, optimizer: nnx.Optimizer, batch : tuple[jnp.array, jnp.array], *, key : jnp.array, n_sample : int):
         image_batch, labels_batch = batch
         grad_fn = nnx.grad(self.loss_function, argnums = 0)
-        grads = grad_fn(self.model, image_batch, n_sample, key = key)
-        self.optimizer.update(grads)
+        grads = grad_fn(model, image_batch, n_sample, key = key)
+        optimizer.update(grads)
 
 
     def _eval_step(self, batch : tuple[jnp.array, jnp.array])-> jnp.array:
@@ -76,9 +76,10 @@ class ClassicVAE_trainer:
         """
         for epoch in range(epochs): 
             key = rngs.params()
+            # Use vmap ? 
             for batch in tqdm(self.train_data_loader): 
                 key, subkey = jr.split(key)
-                self._train_step(batch, key = subkey, n_sample = n_sample)
+                self._train_step(self.model, self.optimizer, batch, key = subkey, n_sample = n_sample)
                 # To be implemented
                 # if eval: 
                 #     self._eval_step(batch)

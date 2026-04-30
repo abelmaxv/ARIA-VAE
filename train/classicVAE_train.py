@@ -6,103 +6,154 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from model.classicVAE import ClassicVAE
-from utils import image_to_jax1d, jax_collate_fn
 
 import jax
 import jax.numpy as jnp
 import jax.random as jr
 from flax import nnx
-import optax
-
+from jax.scipy.stats import multivariate_normal
 from torch.utils.data import DataLoader
-from torchvision.datasets import MNIST
-import PIL
-
 from tqdm import tqdm
 
-from functools import partial
 
 
-# TO DO : 
-# - Implement nnx.metric
 
 class ClassicVAE_trainer: 
-    """_summary_
-    """
 
-    def __init__(self, model: ClassicVAE, optimizer: nnx.Optimizer, train_data_loader: DataLoader, test_data_loader : DataLoader):
+    def __init__(self, model: ClassicVAE, optimizer: nnx.Optimizer):
+        """
+        Args:
+            model (ClassicVAE): The VAE model to train.
+            optimizer (nnx.Optimizer): Optimizer wrapping the model parameters.
+        """
         self.model = model
         self.optimizer = optimizer
-        self.train_data_loader = train_data_loader
-        self.test_data_loader = test_data_loader
+        self.metrics = nnx.MultiMetric(loss = nnx.metrics.Average(argname='loss'))
 
+    
+    def compute_loss(self, model : ClassicVAE, batch : jnp.array, key : jax.Array)->jnp.array:
+        """Computes the negative ELBO loss for a batch.
 
+        Args:
+            model (ClassicVAE): The VAE model.
+            batch (jnp.array): Batch of input images of shape (N, in_dim).
+            key (jax.Array): PRNG key for sampling.
 
-    def loss_function(self, model: ClassicVAE, image_batch : tuple[jnp.array, jnp.array], n_sample : int, key : jnp.array) -> jnp.array:
-        """ TO DO
+        Returns:
+            jnp.array: Scalar loss value (negative ELBO).
         """
+        return _compute_loss(model, batch, key)
 
+
+       
+    def train_step(self, model : ClassicVAE, optimizer : nnx.Optimizer, metrics : nnx.MultiMetric, batch : jnp.array):
+        """Runs one JIT-compiled training step: computes gradients, updates parameters, and logs the loss.
+
+        Args:
+            model (ClassicVAE): The VAE model.
+            optimizer (nnx.Optimizer): Optimizer to apply gradients.
+            metrics (nnx.MultiMetric): Metrics accumulator.
+            batch (jnp.array): Batch of input images of shape (N, in_dim).
+        """
+        _train_step(model, optimizer, metrics, batch)
+    
+    
+    def eval_step(self, model : ClassicVAE, metrics : nnx.MultiMetric, batch : jnp.ndarray) -> jnp.ndarray:
+        """Runs one JIT-compiled evaluation step: computes the loss and logs it without updating parameters.
+
+        Args:
+            model (ClassicVAE): The VAE model.
+            metrics (nnx.MultiMetric): Metrics accumulator.
+            batch (jnp.ndarray): Batch of input images of shape (N, in_dim).
+        """
+        _eval_step(model, metrics, batch)
+
+    
+    def train(self, epochs : int , train_data_loader : DataLoader, test_dataloader : DataLoader, eval_every : int = 50) -> tuple[list, list]:
+        """Trains the model for a given number of epochs and returns loss histories.
+
+        Args:
+            epochs (int): Number of training epochs.
+            train_data_loader (DataLoader): DataLoader for the training set.
+            test_dataloader (DataLoader): DataLoader for the evaluation set.
+            eval_every (int): Number of batches between evaluation steps.
+
+        Returns:
+            tuple[list, list]: Train loss history and eval loss history.
+        """
+        train_history = []
+        eval_history = []
+
+        # Loading bar for epochs: 
+        epoch_bar = tqdm(range(epochs), desc='Training')
+        with jax.debug_nans(True):
+            for epoch in epoch_bar:
+                
+                # Loading bar for batches
+                batch_bar = tqdm(train_data_loader, desc=f"Epoch {epoch}", leave=False)
+
+                for batch_id, batch_data in enumerate(batch_bar):
+
+                    # Train step : 
+                    self.model.train() # Pas vraiment utile car pas de dropout ...
+                    self.train_step(self.model, self.optimizer, self.metrics, batch_data[0])
+
+                    # Eval step :
+                    if batch_id>0 and (batch_id%eval_every == 0 or batch_id == len(train_data_loader)-1):
+                        train_metrics = self.metrics.compute()
+                        current_train_loss = float(train_metrics["loss"])
+                        train_history.append(current_train_loss)
+                        self.metrics.reset()
+                        
+                        self.model.eval()
+                        for _, test_batch_data in enumerate(test_dataloader):
+                            self.eval_step(self.model, self.metrics, test_batch_data[0])
+
+                        eval_metrics = self.metrics.compute()
+                        current_eval_loss = float(eval_metrics["loss"])
+                        eval_history.append(current_eval_loss)
+                        self.metrics.reset()
+
+                        batch_bar.set_postfix(train_loss=f"{current_train_loss:.4f}", 
+                                           val_loss=f"{current_eval_loss:.4f}")
+        return train_history, eval_history
+
+
+##### Pure version of methods for jit compilation #####
+@nnx.jit
+def _compute_loss(model : ClassicVAE, batch : jnp.array, key : jax.Array)->jnp.array:
+    def elbo_single(x : jnp.array, key : jax.Array)->jnp.array: 
+        # Computes mean and variance of the encoder
         latent_dim = model.latent_dim
+        mu_enc, logvar_enc = model.encoder(x)
 
-        def loss_single(x: jnp.array, n_sample : int) -> jnp.array:
-            mu_x, log_sigma_x = model.encoder(x)
-            zs = mu_x[None, :] + jnp.exp(log_sigma_x)[None, :] * jr.normal(key, shape=(n_sample, latent_dim))
-            
-            def log_likelihood(z: jnp.array) -> jnp.array:
-                ps = model.decoder(z)
-                return jnp.sum(jnp.log(ps)*x + jnp.log(1-ps)*(1-x))
+        # Sample from q_\phi(z|x) with reparametrization trick
+        z = mu_enc + jnp.exp(0.5*logvar_enc)*jr.normal(key, shape = (latent_dim,))
 
-            decoder_term = -jnp.mean(nnx.vmap(log_likelihood)(zs))
-            encoder_term = jnp.sum(0.5*(mu_x**2 + jnp.exp(log_sigma_x)**2-1)-log_sigma_x)
-            return decoder_term + encoder_term
-        
-        return jnp.mean(nnx.vmap(lambda image : loss_single(image, n_sample))(image_batch))
+        # Computes p_\theta(z)
+        p_dec = model.decoder(z)
+        p_dec = jnp.clip(p_dec, 1e-7, 1.0 - 1e-7)
 
-            
-    @partial(nnx.jit, static_argnames = ["self", "n_sample"])
-    def _train_step(self, model: ClassicVAE, optimizer: nnx.Optimizer, batch : tuple[jnp.array, jnp.array], *, key : jnp.array, n_sample : int):
-        image_batch, labels_batch = batch
-        grad_fn = nnx.grad(self.loss_function, argnums = 0)
-        grads = grad_fn(model, image_batch, n_sample, key = key)
-        optimizer.update(grads)
+        # Computes the ELBO
+        term_prior = multivariate_normal.logpdf(z, jnp.zeros(shape = (latent_dim,)), jnp.eye(latent_dim))
+        term_dec = jnp.sum(x*jnp.log(p_dec) + (1-x)*jnp.log(1-p_dec))
+        term_enc = multivariate_normal.logpdf(z, mu_enc, jnp.diag(jnp.exp(logvar_enc)))
+        elbo = term_prior + term_dec - term_enc
+        return elbo
+
+    keys = jr.split(key, batch.shape[0])
+    elbo = jnp.mean(jax.vmap(elbo_single)(batch, keys))
+    return -elbo
 
 
-    def _eval_step(self, batch : tuple[jnp.array, jnp.array])-> jnp.array:
-        # To be implemented with metrics
-        pass
+@nnx.jit    
+def _train_step(model : ClassicVAE, optimizer : nnx.Optimizer, metrics : nnx.MultiMetric, batch : jnp.array):
+    val_and_grad_fn = nnx.value_and_grad(_compute_loss, argnums = 0)
+    val, grads = val_and_grad_fn(model, batch, model.rngs.param())
+    optimizer.update(model, grads)
+    metrics.update(loss = val)
 
-    def __call__(self, epochs: int, n_sample: int = 10, *, rngs: nnx.Rngs):
-        """Launch the training procedure."""
-        print(f"Training for {epochs} epochs...\n")
-
-        for epoch in tqdm(range(epochs), desc="Epochs"):
-            key = rngs.params()
-            batch_iter = tqdm(self.train_data_loader, desc=f"Epoch {epoch+1}", leave=False)
-            for batch in batch_iter:
-                key, subkey = jr.split(key)
-                self._train_step(self.model, self.optimizer, batch, key=subkey, n_sample=n_sample)
-            
-
-
-if __name__ == "__main__":
-
-    # Test if the methods run without errors
-
-    train_dataset = MNIST(root = "./../data", train = True, download = True, transform = image_to_jax1d)
-    test_dataset = MNIST(root = "./../data", train = False, download = True, transform = image_to_jax1d)
-
-    train_data_loader = DataLoader(train_dataset, batch_size = 128, shuffle = True, collate_fn = jax_collate_fn)
-    test_data_loader = DataLoader(test_dataset, batch_size = 128, shuffle = True, collate_fn = jax_collate_fn)
-
-    in_dim = train_dataset[0][0].shape[0]
-    latent_dim = 64
-    hidden_dim = 128
-    rngs = nnx.Rngs(jax.random.PRNGKey(42))
-    learning_rate = 0.001
-    epochs = 5
-
-    model = ClassicVAE(in_dim = in_dim, latent_dim = latent_dim, hidden_dim = hidden_dim, rngs = rngs)
-    optimizer = nnx.Optimizer(model, optax.adam(learning_rate))
-    trainer = ClassicVAE_trainer(model, optimizer, train_data_loader=train_data_loader, test_data_loader=test_data_loader)
-
-    trainer(epochs = epochs, rngs = rngs)
+@nnx.jit
+def _eval_step(model : ClassicVAE, metrics : nnx.MultiMetric, batch : jnp.ndarray):
+    loss = _compute_loss(model, batch, model.rngs.param())
+    metrics.update(loss = loss)

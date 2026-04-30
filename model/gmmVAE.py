@@ -11,7 +11,7 @@ from model.classicVAE import Encoder_conv, Decoder_conv
 class GMMVAE(nnx.Module):
     """Variational Autoencoder with GMM prior combining an encoder, reparameterization, and decoder."""
 
-    def __init__(self, in_dim: int, latent_dim: int, hidden_dim : int, K : int, rngs: nnx.Rngs):
+    def __init__(self, in_dim: int, latent_dim: int, hidden_dim : int, K : int, rngs: nnx.Rngs, beta : float = 1.):
         """
         Args:
             in_dim (int): Dimensionality of the input data.
@@ -26,9 +26,11 @@ class GMMVAE(nnx.Module):
         self.decoder = Decoder_conv(latent_dim=latent_dim, hidden_dim=hidden_dim, out_dim=in_dim, rngs=rngs)
         # GMM parameters
         self.K = nnx.static(K) 
-        self.logit_alpha_gmm = nnx.Param(rngs.normal(shape = (K,)))
+        self.logit_alpha_gmm = nnx.Param(jnp.ones(shape = (K,)))
         self.mu_gmm = nnx.Param(3.0 * jnp.eye(K, latent_dim))
         self.logvar_gmm = nnx.Param(rngs.normal(shape = (K, latent_dim)))
+        # Beta-VAE 
+        self.beta = nnx.static(beta)
 
 
     def generate(self, key : jax.Array) -> jnp.array : 

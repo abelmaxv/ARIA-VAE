@@ -122,20 +122,21 @@ class GMMVAE_trainer:
 ##### Pure version of methods for jit compilation #####
 @nnx.jit
 def _gmm_logpdf(z, logit_alpha, mu, logvar):
-    def gaussian_pdf_single(mu_single, logvar_single): 
+    def gaussian_logpdf_single(mu_single, logvar_single):
         cov = jnp.diag(jnp.exp(logvar_single))
-        return multivariate_normal.pdf(z, mu_single, cov)
-    gauss_comp = jax.vmap(gaussian_pdf_single)(mu, logvar)
-    pdf = jnp.sum(jax.nn.softmax(logit_alpha)*gauss_comp)
-    return jnp.log(pdf)
+        return multivariate_normal.logpdf(z, mu_single, cov)
+    log_gauss_comp = jax.vmap(gaussian_logpdf_single)(mu, logvar)
+    log_weights = jax.nn.log_softmax(logit_alpha)
+    return jax.scipy.special.logsumexp(log_weights + log_gauss_comp)
 
 
 @nnx.jit
 def _compute_loss_gmm(model : GMMVAE, batch : jnp.array, key : jax.Array)->jnp.array:
-    #Get GMM parameters
+    #Get model's parameters
     logit_alpha_gmm = model.logit_alpha_gmm.get_value()
     mu_gmm = model.mu_gmm.get_value()
     logvar_gmm = model.logvar_gmm.get_value()
+    beta = model.beta
 
     def elbo_single(x : jnp.array, key : jax.Array)->jnp.array: 
         # Computes mean and variance of the encoder
@@ -153,7 +154,7 @@ def _compute_loss_gmm(model : GMMVAE, batch : jnp.array, key : jax.Array)->jnp.a
         term_prior = _gmm_logpdf(z, logit_alpha_gmm, mu_gmm, logvar_gmm)
         term_dec = jnp.sum(x*jnp.log(p_dec) + (1-x)*jnp.log(1-p_dec))
         term_enc = multivariate_normal.logpdf(z, mu_enc, jnp.diag(jnp.exp(logvar_enc)))
-        elbo = term_prior + term_dec - term_enc
+        elbo = term_dec + beta*(term_prior - term_enc)
         return elbo
 
     keys = jr.split(key, batch.shape[0])

@@ -19,6 +19,7 @@ class GMMVAE(nnx.Module):
             hidden_dim (int): Number of hidden units in encoder and decoder.
             K (int) : Number of clusters in the GMM model.
             rngs (nnx.Rngs): PRNG keys for parameter initialization and sampling.
+            beta (float) : beta parameter of beta-VAE.
         """
         self.rngs = rngs
         self.latent_dim = nnx.static(latent_dim)    

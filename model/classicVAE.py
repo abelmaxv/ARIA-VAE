@@ -155,7 +155,7 @@ class ClassicVAE(nnx.Module):
             arch (str) : Type of architecture for the encoder ("conv" or "linear")
         """
         self.rngs = rngs
-        self.latent_dim = latent_dim
+        self.latent_dim = nnx.static(latent_dim)
         if arch == "linear" :
             self.encoder = Encoder_linear(in_dim=in_dim, latent_dim=latent_dim, hidden_dim=hidden_dim, rngs=rngs)
             self.decoder = Decoder_linear(latent_dim=latent_dim, hidden_dim=hidden_dim, out_dim=in_dim, rngs=rngs)

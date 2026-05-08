@@ -8,6 +8,7 @@
 \usepackage{mathpazo}  % Font for math
 
 \usepackage[margin=2.5cm]{geometry}
+\usepackage{url}
 
 \usepackage{amsmath}
 \usepackage{amsfonts}
@@ -21,8 +22,8 @@
 % Title
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\title{\textbf{Alternatives au prior Gaussien pour les autoencoders variationnels}}
-\date{Novembre 2025}
+\title{\textbf{Au-delà du prior gaussien : autoencoders variationnels pour le clustering et la génération}}
+\date{}
 \author{Abel Verley}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -34,61 +35,68 @@
 \maketitle
 
 \section{Intoduction}
+\cite{burdaImportanceWeightedAutoencoders2016}
 
-\section{Présentation des autoencoders variationnels}
 
-    \subsection{Formulation statistique des modèles variationnels}
-        Soit $(\mathbb{R}^d, \mathcal{B}(\mathbb{R}^d), (p_\theta)_{\theta \in \Theta})$ un modèle statistique dominé par la mesure de Lebesgue. Dans le cadre des \textit{modèles variationnels}, on suppose l'existence d'un \textit{espace latent} $\mathcal{Z} \subseteq \mathbb{R}^m$ de petite dimension équipé d'une densité de probabilité $q$ indépendante de $\theta$ telle que 
+    \subsection{Autoencoders variationnels et dérivation de la ELBO}
+
+        La formulation classique des VAE \cite{kingmaAutoEncodingVariationalBayes2022} s'inscrit dans le cadre des \textit{modèles variationnels} : on suppose que l'espace de nos données $\mathcal X = \mathbb R^d$ est équipé d'un modèle hiérarchique $(p_\theta)_{\theta \in \Theta}$, basé sur un espace latent $\mathcal Z = \mathbb R^m$ de plus faible dimension :
+        \begin{align*}
+            & z \sim q(z) := \mathcal{N}(0, I_m) \\
+            & x \sim p_\theta(x|z) 
+        \end{align*}
+        où $p_\theta(x|z)$ a une forme particulièrement simple, par exemple un produit de Bernoulli $\prod_{i=1}^d \mathcal B(x^i|\beta_\theta^i(z))$ dans le cadre du jeu de données MNIST, où $\beta_\theta(z)$ est un réseau de neurones artificiel de paramètres $\theta$. La densité $q(z)$ est appelée le \textit{prior}, $p_\theta(x|z)$ est appelé le \textit{décodeur} (dans le sens où il décode l'information contenue dans l'espace latent pour reconstruire la variable observée) et la densité a posteriori $p_\theta(z|x)$ l'\textit{encodeur} (dans le sens où il encode une donnée dans l'espace latent de faible dimension). L'intérêt de ce modèle est double : premièrement, à l'aide de l'encodeur, il permet une réduction de dimension de la variable observée $x$, de sorte à effectuer du traitement dans l'espace latent ; deuxièmement, à l'aide du décodeur, les autoencoders variationnels constituent un modèle génératif de la variable observée $x$.\\
+
+        Si le prior $q(z)$ et le décodeur $p_\theta(x|z)$ ont des expressions simples, celles de la vraisemblance $p_\theta(x)$ et de l'encodeur $p_\theta(z|x)$ font intervenir une intégrale qui n'est pas accessible en pratique et empêche une stratégie d'apprentissage par \textit{maximum de vraisemblance} :
+
         \begin{equation}
-            p_\theta(x) = \int p_\theta(x | z) q(z) dz
+            \label{eq:vraisemblance}
+            p_\theta(x) = \int p_\theta(x | z) q(z) dz 
         \end{equation}
 
-        où typiquement $p_\theta(x | z)$ a une forme particulièrement simple (e.g. $\mathcal{N}(x | \mu_\theta(z), \Sigma_\theta(z))$). Plus intuitevement, on suppose dans les modèles variationnels que la variable observée $x$ de grande dimension est expliquée par de l'information plus concise contenue dans l'espace latent $z$. La densité $q$ est appelée \textit{prior} sur l'espace latent tandis que $p_\theta(x | z)$ est appelée \textit{decodeur} (dans le sens où il décode l'information contenue dans l'espace latent pour reconstruire la variable observée). La distribution \textit{a posteriori} $p_\theta(z | x)$ est donnée par l'équation suivante.
-
-        \begin{equation}
-            p_\theta(z | x) = \frac{p_\theta(x | z) q(z)}{\int p_\theta(x | z) q(z) dz}
-        \end{equation}
-        
-        L'intégrale au dénominateur de cette expression n'est généralement pas calculable en forme close, et n'est pas accessible numériquement en grande dimension. De même, la \textit{vraisemblance} $p_\theta(x)$ n'est pas accessible numériquement en grande dimension. Les \textit{autoencoders variationnels} proposent d'introduire une approximation $q_\phi(z | x)$ de la distribution a posteriori $p_\theta(z | x)$ qu'on appelle \textit{encodeur}. \\
-
-        L'intéret de ce modèle est double : premièrement, à l'aide de l'encodeur, il permet une réduction de dimension de la variable observée $x$, de sorte à effectuer du traitement dans l'espace latent (e.g du clustering) ; deuxièmement, à l'aide du decodeur, les autoencoders variationnels consituent un modèle génératif de la variable observée $x$.
-
-        
-    \subsection{Autoencoders variationnels et borne ELBO}
-        Une approche bien souvent utilisée en estimation paramétrique est l'estimation du maximum de vraissemblance (MLE). Elle consiste, étant donnée un échantillon i.i.d. $(x_i)_{i=1, \dots n}$ d'une distribution $p_{\theta^*}$ et sous réserve d'existence, à estimer $\theta^*$ par
-        \begin{equation}
-            \hat{\theta} \in \arg\max_{\theta \in \Theta} \sum_{i=1}^n \log p_{\theta}(x_i)
-        \end{equation}
-
-        
-        Dans \textit{autoencoders variationnels} (VAE) les distributions $q_\phi(z | x)$ et $p_\theta(x | z)$ introduites ci-dessus sont généralement paramétrées par des réseaux de neurones profonds de paramètres respectifs $\phi \in \Phi$ et $\theta \in \Theta$.  Comme expliqué précédemment, la fonction de vraissemblance n'est pas accessible, et par conséquent l'estimation du maximum de vraissemblance n'est pas possible. On peut cependant faire apparaitre la décomposition suivante de la log-vraissemblance, sous reserve que toutes les densités soient strictement positives :\\
+        La solution alternative est, plutôt que d'optimiser la log-vraisemblance, de considérer une borne inférieure de cette dernière appelée \textit{Evidence Lower Bound (ELBO)}. Il existe plusieurs manières de dériver cette borne inférieure ; au vu des fondements statistiques des VAE, il semble pertinent de présenter celle qui repose sur l'échantillonnage préférentiel (\textit{importance sampling}) \cite{burdaImportanceWeightedAutoencoders2016}. Remarquons que l'équation \ref{eq:vraisemblance} peut se réécrire $p_\theta(x) = \mathbb E_{z \sim q(z)}[p_\theta(x|z)]$, de sorte qu'en introduisant une famille de distributions paramétrées $q_\phi(z|x)$, on obtient la dérivation suivante :
 
         \begin{align*}
-            \log(p_\theta(x)) &= \mathbb{E}_{z \sim q_\phi(z | x)} \left[ \log\left( \frac{p_\theta(x)p_\theta(z | x)q_\phi(z | x)}{p_\theta(z | x)q_\phi(z | x)} \right) \right] \\ 
-                            &= \mathbb{E}_{z \sim q_\phi(z | x)} \left[\log(\frac{p_\theta(x)p_\theta(x | z)q(z)}{p_\theta(x)q_\phi(z | x)}) \right] + D_{KL}(q_\phi(z | x) \| p_\theta(z | x)) \\
-                        &= \mathbb{E}_{z \sim q_\phi(z | x)} \left[\log(p_\theta(z |x))\right] - D_{KL}(q_\phi(z | x) \| q(z)) + D_{KL}(q_\phi(z | x) \| p_\theta(z | x))
+            \frac{1}{N}\sum_{k = 1}^N\log p_\theta(x_k) &= \frac{1}{N}\sum_{k = 1}^N \log \mathbb E_{z \sim q(z)}[p_\theta(x_k|z)] \\ 
+                            &=\frac{1}{N}\sum_{k = 1}^N \log \mathbb E_{z \sim q_\phi(z|x_k)}\left[\frac{p_\theta(x_k|z)q(z)}{q_\phi(z|x_k)}\right] \\
+                            &\ge \underbrace{\frac{1}{N}\sum_{k = 1}^N\left( \mathbb{E}_{z \sim q_\phi(z|x_k)}[\log p_\theta(x_k,z)] + \mathbb H [q_\phi(z|x_k)]\right)}_{\mathcal L_{\mathrm{ELBO}}(\theta, \phi|x)}
         \end{align*}
+        la dernière ligne étant obtenue en appliquant l'inégalité de Jensen, où $\mathbb H$ désigne l'entropie. Cette borne inférieure peut être réécrite de nombreuses manières, donnant lieu à différentes interprétations. Par exemple :
+        \begin{equation}
+            \label{eq:ELBO}
+            \mathcal L_{\mathrm{ELBO}}(\theta, \phi | x) =\frac{1}{N}\sum_{k = 1}^N \left( \log p_\theta(x_k) - D_{KL}(q_\phi(z|x_k)\,\|\,p_\theta(z|x_k))\right)
+        \end{equation}
+        de sorte que maximiser l'ELBO vis-à-vis de $\theta$ et $\phi$ revient d'une part à un calcul de maximum de vraisemblance sur $\theta$, et d'autre part à l'apprentissage de l'encodeur $q_\phi(z | x)$ approximant la distribution a posteriori $p_\theta(z | x)$.
+        
 
-        On appelle \textit{evidence lower bound} (ELBO) la quantité :
-        \begin{align}
-            \mathcal{L}_{(\theta, \phi)}(x) &= \mathbb{E}_{z \sim q_\phi(z | x)} \left[\log(p_\theta(z |x))\right] - D_{KL}(q_\phi(z | x) \| q(z)) \\
-            &= \mathbb{E}_{z \sim q_\phi(z | x)} \left[\log(p_\theta(x, z))- \log(q_\phi(z | x))\right] 
-        \end{align}
-
-        Notons que les densités présentes dans la première expression de ELBO sont toutes connues, et puisque la divergence de Kullback-Leibler est toujours positive, on a $\log(p_\theta(x)) \geq \mathcal{L}_{(\theta, \phi)}(x)$ : ces deux observations justifient le nom d'ELBO. Par ailleurs, remarquons que, puisque $\mathcal{L}_{(\theta, \phi)}(x) = \log(p_\theta(x)) - D_{KL}(q_\phi(z | x) \| p_\theta(z | x))$, maximiser l'ELBO vis à vis de $\theta$ et $\phi$ revient d'autre part à un calcul de maximum de vraissemblance sur $\theta$ mais d'autre part à l'apprentissage de l'encodeur $q_\phi(z | x)$ approximant la distribution a posteriori $p_\theta(z | x)$.
     \subsection{Astuce de reparamétrisation et fonction de perte}
         
-        Il existe des méthodes d'optimisation standard pour maximiser ou minimiser des fonctions de la forme $J: \psi \mapsto \mathbb{E}_{z \sim p}[j(\psi,z)]$, on pense notamment aux algorithmes de descente de gradient stochastique (SGD) ou adaptative moment estimation (ADAM). On souhaiterais pouvoir appliquer de telles méthodes sur l'ELBO, avec la fonction $J: (\theta, \phi) \mapsto - \mathcal{L}_{(\theta, \phi)}(x)$, mais la dépendance en $\phi$ de la distribution de $q_\phi(z | x)$ qui génère l'espérence pose problème. \\
-        Le succès des autoencoders variationnels repose sur l'utilisation d'une \textit{astuce de reparamétrisation} (plus couramment \textit{reparametrization trick} en anglais) qui permet de contourner ce problème. Cette astuce consiste à supposer qu'il existe une transformation $g$ et une variable aléatoire $\epsilon$ de loi $\pi$ telle que si $z = g(\phi, x, \epsilon)$, alors $z \sim q_\phi(z | x)$. De cette manière, on peut écrire l'ELBO sous la forme suivante : 
-        \begin{equation}
-            \mathcal{L}_{(\theta, \phi)}(x) = \mathbb{E}_{\epsilon \sim \pi} \left[ \log(p_\theta(x, g(\phi, x, \epsilon))) - \log(q_\phi(g(\phi, x, \epsilon) | x)) \right]
-        \end{equation}
-        et alors les algorithmes d'optimisation stochastiques peuvent être appliqués sous des hypothèses raisonnables de régularité.
+        Il existe des méthodes d'optimisation standard pour maximiser ou minimiser des fonctions de la forme $J: \psi \mapsto \mathbb{E}_{z \sim p}[j(\psi,z)]$, on pense notamment aux algorithmes de descente de gradient stochastique (SGD) ou d'estimation adaptative des moments (ADAM). On souhaiterait pouvoir appliquer de telles méthodes sur l'ELBO, avec la fonction $J: (\theta, \phi) \mapsto - \mathcal{L}_{\mathrm{ELBO}}(\theta, \phi | x)$, mais la dépendance en $\phi$ de la distribution $q_\phi(z | x)$ apparaissant en indice de l'espérance pose problème.\\
 
-    \section{Le choix du prior}
-        \subsection{"Vanilla VAE" : prior Gaussien}
-        \subsection{Mixture de Gaussienne prior}
-        \subsection{Normalizing flows prior}
+        Le succès des autoencoders variationnels repose sur l'utilisation d'une \textit{astuce de reparamétrisation} (\textit{reparametrization trick}) qui permet de contourner ce problème \cite{kingmaAutoEncodingVariationalBayes2022}. Cette astuce consiste à réécrire la distribution $q_\phi(z|x)$ comme la transformation d'une variable $\epsilon \sim \pi(\epsilon)$ indépendante de $\phi$ par une application déterministe : si $z = g(\phi, x, \epsilon)$, alors $z \sim q_\phi(z | x)$. De cette manière, on peut réécrire l'ELBO sous la forme suivante :
+                \begin{equation}
+                    \mathcal{L}_{\mathrm{ELBO}}(\theta, \phi |x) = \frac{1}{N}\sum_{k = 1}^N\mathbb{E}_{\epsilon \sim \pi} \left[ \log p_\theta(x_k, g(\phi, x_k, \epsilon)) - \log q_\phi(g(\phi, x_k, \epsilon) | x_k) \right]
+                \end{equation}
+        et les algorithmes d'optimisation stochastiques peuvent alors être appliqués sous des hypothèses raisonnables de régularité. Dans la formulation classique des VAE \cite{kingmaAutoEncodingVariationalBayes2022}, on choisit $q_\phi(z|x) = \mathcal{N}(z \mid \mu_\phi(x), \mathrm{diag}(\sigma^2_\phi(x)))$ où $\mu_\phi(x)$ et $\sigma^2_\phi(x)$ sont paramétrés par des réseaux de neurones artificiels de paramètres $\phi$. L'astuce de reparamétrisation s'applique alors avec $\epsilon \sim \mathcal N(0, I_m)$ via :
+                \begin{equation}
+                    z = \mu_\phi(x) + \sigma_\phi(x) \odot \epsilon
+                \end{equation}
+        où $\odot$ désigne le produit élément par élément.
+
+    \section{Mixture de gaussienne comme prior du VAE}
+        \subsection{Influence du prior dans la ELBO}
+            Dans la section précédente, nous avons abordé la formulation classique des VAE, reposant sur un prior gaussien standard. Rien ne contraint cependant un tel choix, et l'objet de ce projet est précisément de questionner son influence. Notons par ailleurs que rien n'empêche de paramétrer le prior $q_\lambda(z)$ par des paramètres appris $\lambda$. Commençons par analyser comment le prior influence le modèle au travers de l'ELBO \cite{tomczak2022priors}. À cette fin, réécrivons l'ELBO en faisant explicitement intervenir le prior :
+
+            \begin{equation}
+                \label{eq:ELBO_prior}
+                \mathcal{L}_{\mathrm{ELBO}}(\theta, \phi, \lambda | x) 
+                = \frac{1}{N}\sum_{k=1}^N \left(\mathbb{E}_{z \sim q_\phi(z|x_k)}\left[\log p_\theta(x_k|z)\right] + \mathbb{H}\left[q_\phi(z|x_k)\right]\right)
+                - \mathbb{CE}\left[q_\phi(z) \,\Big\|\, q_\lambda(z)\right]
+            \end{equation}
+            où $\mathbb{CE}$ désigne la cross-entropie et $q_\phi(z) = \frac{1}{N} \sum_{k=1}^N q_\phi(z|x_k)$ désigne le \textit{postérieur agrégé}, c'est-à-dire le mélange des distributions encoder sur l'ensemble des données. Au regard de cette décomposition, on remarque que la maximisation de l'ELBO tend à rapprocher le postérieur agrégé $q_\phi(z)$ du prior $q_\lambda(z)$. Cette observation met en exergue l'influence du prior sur la géométrie de l'espace latent et l'importance du choix de ce dernier.
+        \subsection{Mixture de Gaussienne prior (GMM VAE)}
+            
+        \subsection{Encodage Profond Variationnel (VaDE)}
 
     \section{Experiences numériques}
         \subsection{Architecture des modèles et jeux de données}
@@ -96,6 +104,11 @@
         \subsection{Generation d'image}
         \subsection{Visualisation de l'espace latent}
 
+    \section{Conclusion et ouverture}
+
 \section*{Bibliographie}
+\bibliographystyle{apalike}
+\bibliography{ref}
+
 
 \end{document}

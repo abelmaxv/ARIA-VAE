@@ -11,7 +11,16 @@ from model.classicVAE import Encoder_conv, Decoder_conv
 class GMMVAE(nnx.Module):
     """Variational Autoencoder with GMM prior combining an encoder, reparameterization, and decoder."""
 
-    def __init__(self, in_dim: int, latent_dim: int, hidden_dim : int, K : int, rngs: nnx.Rngs, beta : float = 1.):
+    def __init__(
+        self, 
+        in_dim: int, 
+        latent_dim: int, 
+        hidden_dim : int, 
+        K : int, 
+        rngs: nnx.Rngs, 
+        beta : float = 1., 
+        learn_prior : bool = True,
+        ):
         """
         Args:
             in_dim (int): Dimensionality of the input data.
@@ -20,6 +29,7 @@ class GMMVAE(nnx.Module):
             K (int) : Number of clusters in the GMM model.
             rngs (nnx.Rngs): PRNG keys for parameter initialization and sampling.
             beta (float) : beta parameter of beta-VAE.
+            learn_prior (bool) : indicates if the prior is learned or fixed.
         """
         self.rngs = rngs
         self.latent_dim = nnx.static(latent_dim)    
@@ -27,9 +37,14 @@ class GMMVAE(nnx.Module):
         self.decoder = Decoder_conv(latent_dim=latent_dim, hidden_dim=hidden_dim, out_dim=in_dim, rngs=rngs)
         # GMM parameters
         self.K = nnx.static(K) 
-        self.logit_alpha_gmm = nnx.Param(jnp.ones(shape = (K,)))
-        self.mu_gmm = nnx.Param(3.0 * jnp.eye(K, latent_dim))
-        self.logvar_gmm = nnx.Param(rngs.normal(shape = (K, latent_dim)))
+        if learn_prior :
+            self.logit_alpha_gmm = nnx.Param(jnp.zeros(shape=(K,)))
+            self.mu_gmm = nnx.Param(5.0 * jnp.eye(K, latent_dim))
+            self.logvar_gmm = nnx.Param(jnp.zeros(shape=(K, latent_dim)))
+        else :
+            self.logit_alpha_gmm = nnx.Variable(jnp.zeros(shape=(K,)))
+            self.mu_gmm = nnx.Variable(5.0 * jnp.eye(K, latent_dim))
+            self.logvar_gmm = nnx.Variable(jnp.zeros(shape=(K, latent_dim)))
         # Beta-VAE 
         self.beta = nnx.static(beta)
 

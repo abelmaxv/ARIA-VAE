@@ -86,7 +86,7 @@ class ClassicVAE_trainer:
 
         # Loading bar for epochs: 
         epoch_bar = tqdm(range(epochs), desc='Training')
-        with jax.debug_nans(True):
+        with jax.debug_nans(False):
             for epoch in epoch_bar:
                 
                 # Loading bar for batches

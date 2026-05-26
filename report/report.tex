@@ -9,6 +9,9 @@
 
 \usepackage[margin=2.5cm]{geometry}
 \usepackage{url}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{float}
 
 \usepackage{amsmath}
 \usepackage{amsfonts}
@@ -34,10 +37,16 @@
 
 \maketitle
 
-\section{Intoduction}
-\cite{burdaImportanceWeightedAutoencoders2016}
+
+\section{Introduction}
+    La génération de données est un sujet central dans les probématiques actuelles l'apprentissage automatique : à partir d'un ensemble d'observations, on cherche à apprendre un modèle capable de produire de nouveaux échantillons fidèles à la distribution sous-jacente. Lorsque les données présentent une structure catégorielle, la tâche se complexifie : un bon modèle génératif doit non seulement reproduire la diversité globale des données, mais aussi respecter cette organisation discrète, en produisant des échantillons appartenant à des catégories clairement identifiables plutôt que des hybrides ambigus entre classes. Un modèle qui intègre cette structure catégorielle offre en outre un bénéfice secondaire appréciable : la possibilité d'effectuer du clustering en exploitant la variable catégorielle latente apprise, là où les algorithmes classiques tels que K-means ou les modèles de mélange de gaussiennes ajustés par Expectation-Maximisation peinent à passer à l'échelle des données de grande dimension.\\
+
+    Les autoencodeurs variationnels (VAE) \cite{kingmaAutoEncodingVariationalBayes2022} apportent un cadre élégant pour contourner cette difficulté. En apprenant conjointement un encodeur et un décodeur paramétrés par des réseaux de neurones, ils permettent de projeter les données dans un espace latent de faible dimension où les relations entre observations deviennent plus exploitables, tout en définissant un modèle génératif des données. Dans leur formulation classique, les VAE reposent cependant sur un prior gaussien standard qui tend à concentrer toutes les représentations autour de l'origine, sans distinction entre catégories. Ce choix se révèle inadapté lorsque l'on souhaite que l'espace latent reflète la structure catégorielle des données : il efface précisément l'information que le clustering cherche à révéler. Substituer au prior gaussien un mélange de gaussiennes, dont chaque composante représente une classe latente, ouvre alors la voie à des modèles qui unifient clustering  et génération de données.\\
+
+    Ce rapport explore cette idée à travers l'étude comparative de trois variantes de VAE appliquées au jeu de données MNIST : le VAE classique à prior gaussien, le GMM-VAE \cite{dilokthanakulDeepUnsupervisedClustering2017} introduisant un prior mélange de gaussiennes, et VaDE \cite{jiangVariationalDeepEmbedding2017} qui intègre explicitement la variable de cluster dans la fonction objectif variationnelle. La section~\ref{sec:vae_intro} rappelle la formulation classique des VAE et dérive l'ELBO ainsi que l'astuce de reparamétrisation. La section~\ref{sec:gmm_prior} analyse l'influence du prior sur la géométrie de l'espace latent et présente les modèles GMM-VAE et VaDE. La section~\ref{sec:experiments} compare empiriquement ces approches selon trois critères : qualité de reconstruction, qualité de génération, et structuration de l'espace latent.
 
 \section{Introduction aux VAE}
+\label{sec:vae_intro}
     \subsection{Autoencoders variationnels et dérivation de la ELBO}
 
         La formulation classique des VAE \cite{kingmaAutoEncodingVariationalBayes2022} s'inscrit dans le cadre des \textit{modèles variationnels} : on suppose que l'espace de nos données $\mathcal X = \mathbb R^d$ est équipé d'un modèle hiérarchique $(p_\theta)_{\theta \in \Theta}$, basé sur un espace latent $\mathcal Z = \mathbb R^m$ de plus faible dimension :
@@ -69,7 +78,12 @@
             \label{eq:ELBO}
             \mathcal L_{\mathrm{ELBO}}(\theta, \phi | x) =\frac{1}{N}\sum_{k = 1}^N \left( \log p_\theta(x_k) - D_{KL}(q_\phi(z|x_k)\,\|\,p_\theta(z|x_k))\right)
         \end{equation}
-        de sorte que maximiser l'ELBO vis-à-vis de $\theta$ et $\phi$ revient d'une part à un calcul de maximum de vraisemblance sur $\theta$, et d'autre part à l'apprentissage de l'encodeur $q_\phi(z | x)$ approximant la distribution a posteriori $p_\theta(z | x)$.
+        de sorte que maximiser l'ELBO vis-à-vis de $\theta$ et $\phi$ revient d'une part à un calcul de maximum de vraisemblance sur $\theta$, et d'autre part à l'apprentissage de l'encodeur $q_\phi(z | x)$ approximant la distribution a posteriori $p_\theta(z | x)$. Une variante consiste à introduire un paramètre $\beta$ afin de donner plus ou moins d'importance aux différents termes de la ELBO \cite{conf/iclr/HigginsMPBGBML17}
+
+        \begin{equation}
+            \label{eq:beta_ELBO}
+            \mathcal L_{\mathrm{ELBO}}(\theta, \phi | x) =\frac{1}{N}\sum_{k = 1}^N \left( \log p_\theta(x_k) - \beta D_{KL}(q_\phi(z|x_k)\,\|\,p_\theta(z|x_k))\right)
+        \end{equation}
         
 
     \subsection{Astuce de reparamétrisation et fonction de perte}
@@ -87,6 +101,7 @@
         où $\odot$ désigne le produit élément par élément.
 
     \section{Mixture de gaussienne comme prior du VAE}
+    \label{sec:gmm_prior}
         \subsection{Influence du prior dans la ELBO}
             Dans la section précédente, nous avons abordé la formulation classique des VAE, reposant sur un prior gaussien standard. Rien ne contraint cependant un tel choix, et l'objet de ce projet est précisément de questionner son influence. Notons par ailleurs que rien n'empêche de paramétrer le prior $q_\lambda(z)$ par des paramètres appris $\lambda$. Commençons par analyser comment le prior influence le modèle au travers de l'ELBO \cite{tomczak2022priors}. À cette fin, réécrivons l'ELBO en faisant explicitement intervenir le prior :
 
@@ -122,7 +137,7 @@
             $$
             q_\lambda(z, c_j) = q_\lambda(c_j)\,q_\lambda(z | c_j) = \alpha_j\,\mathcal{N}(z | \mu_j, \sigma_j^2 \odot I_m).
             $$
-            On suppose de plus que le décodeur ne dépend que de $z$, soit $p_\theta(x | z, c_j) = p_\theta(x | z)$, et que la distribution variationnelle sur $\mathcal{Z} \times \{1, \dots, K\}$ se factorise : $q_\phi(z, c_j | x) = q_\phi(z | x) \alpha_\phi^j(x)$. On peut alors raisonner de la même manière que pour la dérivation de l'ELBO classique \eqref{eq:elbo_derivation} en considérant la variable latente jointe $(z,c_j)$:
+            On suppose de plus que le décodeur ne dépend que de $z$, soit $p_\theta(x | z, c_j) = p_\theta(x | z)$, et que la distribution variationnelle sur $\mathcal{Z} \times \{1, \dots, K\}$ se factorise : $q_\phi(z, c_j | x) = q_\phi(z | x)p(c_j|z)$. On peut alors raisonner de la même manière que pour la dérivation de l'ELBO classique \eqref{eq:elbo_derivation} en considérant la variable latente jointe $(z,c_j)$:
             
             \begin{align}
                 \frac{1}{N}\sum_{k=1}^N \log p_\theta(x_k)
@@ -131,11 +146,11 @@
                 &\ge \underbrace{\frac{1}{N}\sum_{k=1}^N \left(\mathbb{E}_{(z,\,c_j) \sim q_\phi(z,\,c_j|x_k)}\!\left[\log p_\theta(x_k|z) + \log q_\lambda(z,c_j) - \log q_\phi(z|x_k) - \log q_\phi(c_j|x_k)\right] \right)}_{\mathcal L_{ELBO}^{VaDE}(\theta, \phi, \lambda|x)}
             \end{align}
             
-            En substituant l'expression du prior mélange de gaussiennes, ainsi qu'en utilisant la factorisation $q_\phi(z, c_j | x) = q_\phi(z | x) \alpha_\phi^j(x)$, on obtient la fonction objectif suivante à maximiser :
+            En substituant l'expression du prior mélange de gaussiennes, ainsi qu'en utilisant la factorisation $q_\phi(z, c_j | x) = q_\phi(z | x) p(c_j|z)$, on obtient la fonction objectif suivante à maximiser :
             
             \begin{equation}
                 \label{eq:elbo_vade}
-                \mathcal L_{ELBO}^{VaDE}(\theta, \phi, \lambda|x) = \frac{1}{N}\sum_{k=1}^N\sum_{j = 1}^K\alpha_\phi^j(x_k) \mathbb{E}_{z \sim q_\phi(z|x_k)}\left[\log p_\theta(x_k|z) + \log \alpha_j + \log \mathcal N(z|\mu_j, \sigma_j^2 \odot I_m) - \log q_\phi(z|x_k) - \log \alpha_\phi^j(x_k)\right]
+                \mathcal L_{ELBO}^{VaDE}(\theta, \phi, \lambda|x) = \frac{1}{N}\sum_{k=1}^N \mathbb{E}_{z \sim q_\phi(z|x_k)}\left[\sum_{j = 1}^K p(c_j|z)\left[\log p_\theta(x_k|z) + \log \alpha_j + \log \mathcal N(z|\mu_j, \sigma_j^2 \odot I_m) - \log q_\phi(z|x_k) - \log p(c_j|z)\right]\right]
             \end{equation}
             
             et remarquons que, de part le fait que la variable discrète $c_j$ est sommée en amont de la somme, l'astuce de reparametrization s'applique de manière classique.
@@ -144,17 +159,91 @@
 
 
 
-    \section{Experiences numériques}
+
+    \section{Expériences numériques}
+    \label{sec:experiments}
         \subsection{Architecture des modèles et jeux de données}
-        \subsection{Reconstruction d'image}
-        \subsection{Generation d'image}
-        \subsection{Visualisation de l'espace latent}
+            Les différentes versions de l'autoencodeur variationnel ont été implémentées en utilisant la bibliothèque \texttt{Flax} de l'écosystème \texttt{JAX}. L'intégralité du code produisant ces expériences est accessible sur \url{https://github.com/abelmaxv/ARIA-VAE}.\\
+            Dans la suite du rapport, on compare la version classique du VAE avec les variantes GMM VAE et VaDE. Dans tous les cas, l'espace latent est choisi de dimension $m = 16$. D'autres variantes ont été testés avec un nombre d'epochs d'entrainement moindre et ont été écartées car semblant moins pertinentes, les résultats sont tout de même disponibles en annexe. 
 
-    \section{Conclusion et ouverture}
+            \paragraph{Architectures :}
+                Les réseaux de neurones artificiels de nos méthodes reposent sur une architecture convolutionnelle. L'encodeur est constitué d'une pile de trois couches convolutionnelles ($32$, $64$ puis $128$ canaux, noyaux $3 \times 3$, pas $2$, padding \texttt{SAME}) suivies d'une couche dense de dimension $h = 256$ ; le décodeur reste linéaire pour des raisons de simplicité d'implémentation. Toutes les activations intermédiaires sont des ReLU. Le décoder quant à lui composé de deux couches linéaire et d'une artivation intermédiaire ReLU. Pour les modèles GMM-VAE et VaDE, le nombre de composantes du prior est fixé à $K = 10$, correspondant au nombre de classes attendues, et les paramètres $(\alpha_j, \mu_j, \sigma_j^2)_{j=1,\dots,K}$ sont soit fixés à l'initialisation (mélange de gaussiennes standard équidistantes), soit appris conjointement par descente de gradient.
 
-\section*{Bibliographie}
+                \paragraph{Entraînement en deux temps :}
+                Pour les modèles GMM-VAE et VaDE, l'entraînement se fait en deux phases afin d'initialiser les paramètres du prior correctement. Une première phase de pré-entraînement consiste à entraîner l'auto-encodeur en utilisant uniquement le terme de reconstruction de l'ELBO. Les représentations latentes obtenues sont ensuite utilisées pour appliquer l'algorithme K-means, dont les résultats fournissent les valeurs d'initialisation des paramètres du prior mélange de gaussiennes.
+
+            \paragraph{Jeux de données :}
+                Les expériences sont menées sur le jeu de données MNIST, constitué de $60\,000$ images d'entraînement et $10\,000$ images de test représentant des chiffres manuscrits en niveaux de gris de taille $28 \times 28$. Conformément à l'hypothèse de Bernoulli sur le décodeur, les images sont aplaties en vecteurs de $\mathbb{R}^{784}$ et leurs intensités normalisées dans $[0,1]$. L'ensemble des modèles est entraîné avec l'optimiseur Adam, des mini-batches de taille $128$, pendant un nombre fixé d'époques permettant la convergence de l'ELBO sur l'ensemble de validation. Pour le VAE standard, $100$ époques d'entraînement sont utilisées, tandis que les autres méthodes utilisent $10$ époques de pré-entraînement suivies de $100$ époques d'entraînement.
+
+                \subsection{Reconstruction d'image}
+                On évalue dans un premier temps la capacité des différents modèles à reconstruire fidèlement les images du jeu de test. La figure~\ref{fig:reconstructions} présente, pour chaque modèle, cinq reconstructions échantillonnées sur l'ensemble de test, comparées aux images originales correspondantes.
+            
+                \begin{figure}[H]
+                    \centering
+                    \includegraphics[width=0.6\linewidth]{img/reconstruction.png}
+                    \caption{Reconstructions sur le jeu de test MNIST.}
+                    \label{fig:reconstructions}
+                \end{figure}
+            
+                Les trois modèles reconstruisent fidèlement les images du jeu de test. Les reconstructions produites par les deux modèles à mixture de gaussiennes semblent légèrement plus nettes, bien que les performances globales restent comparables d'un modèle à l'autre.
+            
+            \subsection{Génération d'image}
+                On évalue à présent la qualité générative de chaque modèle en échantillonnant des vecteurs latents selon le prior $q_\lambda(z)$, puis en les décodant. Pour les modèles à mixture de gaussiennes, cette procédure se décompose en deux étapes : tirage d'une composante $c_j \sim \mathrm{Cat}(\alpha)$, puis tirage $z \sim \mathcal{N}(\mu_j, \sigma_j^2 \odot I_m)$. La figure~\ref{fig:generations} présente cinq échantillons générés par chaque modèle.
+            
+                \begin{figure}[H]
+                    \centering
+                    \includegraphics[width=0.6\linewidth]{img/generation.png}
+                    \caption{Échantillons générés à partir du prior pour chaque variante de VAE.}
+                    \label{fig:generations}
+                \end{figure}
+            
+                Le VAE standard produit des images évoquant le style MNIST, mais aucun chiffre ne se dessine clairement. Ce résultat tend à confirmer que le prior gaussien isotrope est inadapté : il induit des interpolations entre représentations distinctes, brouillant ainsi le contenu sémantique des échantillons. À l'inverse, les deux modèles à mixture de gaussiennes génèrent des images où un chiffre est clairement identifiable, malgré quelques distorsions visuelles. Les performances des deux variantes restent comparables.
+            
+            \subsection{Visualisation de l'espace latent}
+                Afin d'illustrer l'influence du prior sur la géométrie de l'espace latent évoquée à la section précédente, on projette le postérieur agrégé $q_\phi(z)$ sur ses deux premières composantes principales. La figure~\ref{fig:latent_space} représente, pour chaque modèle, le nuage des encodages $\mu_\phi(x)$ des images du jeu de test, colorés par classe, ainsi que, pour les modèles à mixture, les moyennes $\mu_j$ des composantes du prior projetées dans le même plan.
+            
+                \begin{figure}[H]
+                    \centering
+                    \includegraphics[width=0.95\linewidth]{img/latente.png}
+                    \caption{Projection PCA en deux dimensions de l'espace latent pour chaque variante de VAE. Les étoiles indiquent les moyennes des composantes du prior pour les modèles à mixture de gaussiennes. Les contours du prior sont représentés en arrière-plan.}
+                    \label{fig:latent_space}
+                \end{figure}
+            
+                On constate que le VAE standard distribue les représentations latentes conformément au prior gaussien isotrope, sans structure apparente. Les deux modèles à mixture de gaussiennes induisent quant à eux une organisation plus fragmentée de l'espace latent. Cependant, les clusters ainsi formés ne correspondent pas clairement aux classes de chiffres, ce qui suggère que la structure apprise par le prior ne s'aligne pas spontanément avec les catégories sémantiques du jeu de données.
+
+        \section{Conclusion et ouverture}
+
+        Ce rapport a exploré l'influence du prior sur la géométrie de l'espace latent des autoencodeurs variationnels, en comparant trois variantes sur MNIST : le VAE classique à prior gaussien, le GMM-VAE et le VaDE. Les expériences montrent que substituer le prior gaussien par un mélange de gaussiennes améliore sensiblement la qualité générative : là où le VAE standard produit des échantillons ambigus, les modèles à mixture génèrent des chiffres clairement identifiables. En revanche, l'objectif de clustering reste non atteint : les représentations latentes ne s'organisent pas spontanément en clusters alignés sur les classes du jeu de données.\\
+
+        Plusieurs pistes pourraient permettre d'améliorer ces résultats. Un entraînement plus long ou une architecture encodeur plus expressive pourrait favoriser l'émergence de clusters plus distincts. Par ailleurs, affiner la stratégie de pré-entraînement constitue également un levier prometteur qui a un fort impact sur la qualité des approches par autoencoders variationnels.
+
 \bibliographystyle{apalike}
 \bibliography{ref}
 
+\appendix
+
+\section{Résultats intermédiares avec d'autres modèles}
+    Dans cette annexe, on présente des résultats intermédiares obtenus en entrainant d'autres modèles sur 10 epochs. On compare l'architecture convolutionnelle du VAE avec l'architecture linéaire, on implémente le modèle avec mixture de gaussienne et prior fixé ainsi qu'une variante par $\beta$-VAE (ici $\beta = 50$) enfin le VaDE est aussi implémenté avec un prior fixe. Ce cette première analyse on décide de ne garder que les modèles présentés dans la section \ref{sec:experiments}.
+
+
+    \begin{figure}[h]
+        \centering
+        \begin{subfigure}{0.48\linewidth}
+            \centering
+            \includegraphics[width=\linewidth]{img/appendix_reconstruction.png}
+            \caption{Reconstructions sur le jeu de test MNIST. De haut en bas : images originales, VAE convolutionnel, GMM-VAE (prior appris), VaDE.}
+            \label{fig:app_reconstructions}
+        \end{subfigure}
+        \hfill
+        \begin{subfigure}{0.48\linewidth}
+            \centering
+            \includegraphics[width=\linewidth]{img/appendix_generation.png}
+            \caption{Échantillons générés à partir du prior pour chaque variante de VAE. De haut en bas : VAE convolutionnel, GMM-VAE (prior appris), VaDE.}
+            \label{fig:app_generations}
+        \end{subfigure}
+
+        \caption{Résultats qualitatifs des trois modèles comparés sur MNIST.}
+        \label{fig:app_results}
+    \end{figure}
 
 \end{document}

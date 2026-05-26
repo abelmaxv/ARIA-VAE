@@ -35,18 +35,20 @@ ARIA-VAE/
 │   └── vade.py             # VaDE (prior GMM + encodeur catégoriel)
 ├── train/
 │   ├── classicVAE_train.py # ClassicVAE_trainer
-│   ├── gmmVAE_train.py     # GMMVAE_trainer
-│   └── vade_train.py       # VaDE_trainer
+│   ├── gmmVAE_train.py     # GMMVAE_trainer (pretrain + init_gmm_kmeans + train)
+│   └── vade_train.py       # VaDE_trainer   (pretrain + init_gmm_kmeans + train)
 ├── test/
 │   ├── classicVAE_test.ipynb       # Expériences VAE linéaire et convolutionnel
 │   ├── gmmVAE_test.ipynb           # GMM-VAE (prior appris)
 │   ├── gmmVAE_fixed_test.ipynb     # GMM-VAE (prior fixe)
 │   ├── beta_gmmVAE_test.ipynb      # GMM β-VAE (β = 50)
-│   ├── vade_test.ipynb             # VaDE (prior appris)
+│   ├── vade_test.ipynb             # VaDE
 │   ├── vade_fixed_test.ipynb       # VaDE (prior fixe)
-│   └── comparative_test.ipynb      # Tous les modèles — reconstruction, génération, espace latent
+│   └── comparative_test.ipynb      # VAE conv, GMM-VAE, VaDE — reconstruction, génération, espace latent
+├── checkpoints/            # Poids sauvegardés (orbax) après entraînement dans comparative_test
 ├── report/
-│   └── report.tex
+│   ├── report.tex
+│   └── img/               # Figures pour le rapport et l'annexe
 ├── utils.py                # image_to_jax1d, jax_collate_fn, plot_image
 └── data/                   # MNIST téléchargé automatiquement ici
 ```
@@ -72,6 +74,9 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 # Visualisation et analyse
 pip install matplotlib seaborn pandas scipy pcax umap-learn tqdm
+
+# Sauvegarde des poids
+pip install orbax-checkpoint
 ```
 
 > **Note Apple Silicon :** définir `os.environ["ENABLE_PJRT_COMPATIBILITY"] = "1"` et `os.environ["JAX_PLATFORMS"] = "cpu"` avant d'importer JAX (déjà fait dans tous les notebooks).
@@ -80,11 +85,11 @@ pip install matplotlib seaborn pandas scipy pcax umap-learn tqdm
 
 ## Démarrage rapide
 
-### Entraînement d'un modèle
+### VAE classique
 
 ```python
-from model import ClassicVAE, GMMVAE, VaDE
-from train import ClassicVAE_trainer, GMMVAE_trainer, VaDE_trainer
+from model import ClassicVAE
+from train import ClassicVAE_trainer
 from utils import image_to_jax1d, jax_collate_fn
 
 from flax import nnx
@@ -92,81 +97,111 @@ import optax
 from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 
-# Données
-train_dataset = MNIST(root="./data", train=True, download=True, transform=image_to_jax1d)
-train_loader  = DataLoader(train_dataset, batch_size=128, shuffle=True, collate_fn=jax_collate_fn)
-test_loader   = DataLoader(
+train_loader = DataLoader(
+    MNIST(root="./data", train=True, download=True, transform=image_to_jax1d),
+    batch_size=128, shuffle=True, collate_fn=jax_collate_fn,
+)
+test_loader = DataLoader(
     MNIST(root="./data", train=False, download=True, transform=image_to_jax1d),
     batch_size=128, shuffle=True, collate_fn=jax_collate_fn,
 )
 
-# VAE classique (convolutionnel)
 model     = ClassicVAE(in_dim=784, latent_dim=16, hidden_dim=256, rngs=nnx.Rngs(0), arch="conv")
 optimizer = nnx.Optimizer(model, optax.adam(1e-3), wrt=nnx.Param)
 trainer   = ClassicVAE_trainer(model, optimizer)
 
-train_history, eval_history = trainer.train(epochs=10, train_data_loader=train_loader, test_dataloader=test_loader)
+train_history, eval_history = trainer.train(epochs=100, train_data_loader=train_loader, test_dataloader=test_loader)
 ```
 
-Les trois classes d'entraînement partagent la même interface :
+### GMM-VAE et VaDE — entraînement en trois phases
+
+Les modèles à prior mélange de gaussiennes suivent un protocole en trois étapes :
 
 ```python
-train_history, eval_history = trainer.train(epochs, train_data_loader, test_dataloader)
+from model import GMMVAE, VaDE
+from train import GMMVAE_trainer, VaDE_trainer
+
+model     = GMMVAE(in_dim=784, latent_dim=16, hidden_dim=256, K=10, rngs=nnx.Rngs(0))
+optimizer = nnx.Optimizer(model, optax.adam(1e-3), wrt=nnx.Param)
+trainer   = GMMVAE_trainer(model, optimizer)
+
+# Phase 1 — pré-entraînement VAE avec prior N(0, I)
+trainer.pretrain(epochs=10, train_data_loader=train_loader, test_dataloader=test_loader)
+
+# Phase 2 — initialisation des paramètres GMM par K-means sur les encodages
+trainer.init_gmm_kmeans(train_data_loader=train_loader)
+
+# Phase 3 — fine-tuning avec l'ELBO GMM complet
+train_history, eval_history = trainer.train(epochs=100, train_data_loader=train_loader, test_dataloader=test_loader)
 ```
+
+La même interface s'applique à `VaDE_trainer`.
 
 ### Échantillonnage et reconstruction
 
 ```python
-import jax, jax.random as jr
+import jax.random as jr
 
 key = jr.PRNGKey(0)
 
 # Générer un nouvel échantillon depuis le prior
-sample = model.generate(key)                        # forme (784,)
+sample = model.generate_mean(key)        # forme (784,), moyenne du décodeur (sans bruit)
 
 # Encoder une image vers un vecteur latent
-z = model.encode(image, key)                        # forme (latent_dim,)
+z = model.encode(image, key)             # forme (latent_dim,)
 
-# Reconstruire (encoder puis décoder, retourne un échantillon de Bernoulli)
-reconstruction = model(image, key)                  # forme (784,)
+# Reconstruire (encoder puis décoder)
+reconstruction = model(image, key)       # forme (784,)
 ```
 
-### Variantes GMM-VAE
+### Sauvegarde et chargement des poids
 
 ```python
-# Prior GMM appris (par défaut)
-model = GMMVAE(in_dim=784, latent_dim=16, hidden_dim=256, K=10, rngs=nnx.Rngs(0))
+import orbax.checkpoint as ocp
+from pathlib import Path
+from flax import nnx
 
-# Prior GMM fixe
-model = GMMVAE(in_dim=784, latent_dim=16, hidden_dim=256, K=10, rngs=nnx.Rngs(0), learn_prior=False)
+checkpointer = ocp.StandardCheckpointer()
+ckpt_dir     = Path("./checkpoints").resolve()
 
-# β-VAE avec prior GMM
-model = GMMVAE(in_dim=784, latent_dim=16, hidden_dim=256, K=10, rngs=nnx.Rngs(0), beta=50)
+# Sauvegarde
+state = nnx.state(model, nnx.Param)
+checkpointer.save(ckpt_dir / "model_gmm", state, force=True)
+checkpointer.wait_until_finished()
 
-# Accéder aux paramètres GMM appris
-alphas = jax.nn.softmax(model.logit_alpha_gmm.get_value())   # poids du mélange
-mu     = model.mu_gmm.get_value()                            # moyennes des composantes (K, latent_dim)
+# Chargement (le modèle doit être instancié avec la même architecture)
+state    = nnx.state(model, nnx.Param)
+restored = checkpointer.restore(ckpt_dir / "model_gmm", state)
+nnx.update(model, restored)
 ```
+
+> **Note :** orbax requiert des chemins absolus — utiliser `.resolve()` sur tout objet `Path`.
 
 ---
 
 ## Expériences
+
+### Notebooks individuels
 
 Chaque notebook dans `test/` suit la même structure :
 
 1. **Entraînement** — instanciation du modèle, configuration de l'optimiseur, boucle d'entraînement
 2. **Reconstruction** — comparaison côte à côte des images originales et reconstruites
 3. **Génération** — échantillons tirés depuis le prior
-4. **Espace latent** — projection PCA des données d'entraînement encodées, colorées par classe de chiffre, avec contour de densité du prior
+4. **Espace latent** — projection PCA et UMAP des encodages colorés par classe, avec contour de densité du prior
 
-`comparative_test.ipynb` combine les sept variantes de modèles en trois figures unifiées :
+### Notebook comparatif
+
+`comparative_test.ipynb` compare les trois modèles retenus — **VAE convolutionnel**, **GMM-VAE (prior appris)** et **VaDE** — en trois figures unifiées :
 
 | Figure | Disposition |
 |--------|-------------|
-| Reconstruction | Grille 8 × 5 (Original + 7 modèles) |
-| Génération | Grille 7 × 5 |
-| Espace latent (ACP) | Grille de sous-figures 4 × 2 avec contour de densité du prior + moyennes GMM |
-| Espace latent (UMAP) | Grille de sous-figures 4 × 2 avec centres de classes/composantes |
+| Reconstruction | Grille 4 × 5 (Original + 3 modèles) |
+| Génération | Grille 3 × 5 |
+| Espace latent (PCA) | 3 sous-figures côte à côte avec contour de densité du prior et moyennes GMM |
+| Espace latent (UMAP) | 3 sous-figures côte à côte avec centres de classes/composantes |
+
+Les poids des trois modèles sont sauvegardés dans `checkpoints/` après entraînement. Une cellule de chargement (après la cellule d'entraînement du VAE conv) permet de relancer le notebook sans réentraîner.
 
 ---
 
@@ -177,6 +212,7 @@ Chaque notebook dans `test/` suit la même structure :
 | `jax` / `jaxlib` | Opérations sur les tableaux, compilation JIT, différentiation automatique |
 | `flax` (API nnx) | Modules de réseaux de neurones, wrapper d'optimiseur |
 | `optax` | Optimiseur Adam |
+| `orbax-checkpoint` | Sauvegarde et chargement des poids de modèles |
 | `torch` / `torchvision` | Téléchargement de MNIST et `DataLoader` uniquement |
 | `pcax` | ACP sur des tableaux JAX |
 | `umap-learn` | Réduction de dimension UMAP |

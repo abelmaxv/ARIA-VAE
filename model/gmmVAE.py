@@ -49,7 +49,7 @@ class GMMVAE(nnx.Module):
         self.beta = nnx.static(beta)
 
 
-    def generate(self, key : jax.Array) -> jnp.array : 
+    def generate(self, key : jax.Array) -> jnp.array :
         """Generates a sample by decoding a random latent vector drawn from the prior.
 
         Args:
@@ -65,6 +65,39 @@ class GMMVAE(nnx.Module):
         z = jr.multivariate_normal(key2, mean = mu_cluster, cov = cov_cluster)
         ps = self.decoder(z)
         return jr.bernoulli(key3, ps)
+
+    def generate_mean(self, key: jax.Array) -> jnp.array:
+        """Generates the decoder mean (Bernoulli probabilities) from the prior.
+
+
+        Args:
+            key (jax.Array): PRNG key for latent sampling.
+
+        Returns:
+            jnp.array: Decoder probabilities in [0, 1] of shape (in_dim,).
+        """
+        key1, key2 = jr.split(key)
+        p = jax.nn.softmax(self.logit_alpha_gmm.value)
+        cluster = jr.choice(key1, self.K, p=p)
+        mu_cluster = self.mu_gmm.value[cluster]
+        cov_cluster = jnp.diag(jnp.exp(self.logvar_gmm.value[cluster]))
+        z = jr.multivariate_normal(key2, mean=mu_cluster, cov=cov_cluster)
+        return self.decoder(z)
+
+    def generate_from_component(self, key: jax.Array, component: int) -> jnp.array:
+        """Generates the decoder mean from a specific GMM component.
+
+        Args:
+            key (jax.Array): PRNG key for latent sampling.
+            component (int): GMM component index in [0, K).
+
+        Returns:
+            jnp.array: Decoder probabilities in [0, 1] of shape (in_dim,).
+        """
+        mu_k = self.mu_gmm.value[component]
+        cov_k = jnp.diag(jnp.exp(self.logvar_gmm.value[component]))
+        z = jr.multivariate_normal(key, mean=mu_k, cov=cov_k)
+        return self.decoder(z)
 
     def encode(self, x : jnp.array, key : jax.Array) -> jnp.array :
         """Encodes an input and samples a latent vector from the posterior.
@@ -106,9 +139,8 @@ class GMMVAE(nnx.Module):
         Returns:
             jnp.ndarray: Bernoulli sample from the decoded output probabilities.
         """
-        mu, log_sigma = self.encoder(x)
+        mu, logvar = self.encoder(x)
         key1, key2 = jr.split(key)
-        z = mu + jnp.exp(log_sigma) * jr.normal(key1, shape=(self.latent_dim,))
-        ps = self.decoder(z)
-        return jr.bernoulli(key2, ps)
+        z = mu + jnp.exp(0.5 * logvar) * jr.normal(key1, shape=(self.latent_dim,))
+        return self.decoder(z)
         

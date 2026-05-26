@@ -165,7 +165,7 @@ class ClassicVAE(nnx.Module):
         else : 
             raise ValueError(f"Invalid architecture argument: '{arch}'. Must be 'conv' or 'linear'.")
 
-    def generate(self, key : jax.Array) -> jnp.array : 
+    def generate(self, key : jax.Array) -> jnp.array :
         """Generates a sample by decoding a random latent vector drawn from the prior.
 
         Args:
@@ -178,6 +178,18 @@ class ClassicVAE(nnx.Module):
         z = jr.normal(key_z, shape=(self.latent_dim,))
         ps = self.decoder(z)
         return jr.bernoulli(key_b, ps)
+
+    def generate_mean(self, key: jax.Array) -> jnp.array:
+        """Generates the decoder mean (Bernoulli probabilities) from the prior.
+
+        Args:
+            key (jax.Array): PRNG key for latent sampling.
+
+        Returns:
+            jnp.array: Decoder probabilities in [0, 1] of shape (in_dim,).
+        """
+        z = jr.normal(key, shape=(self.latent_dim,))
+        return self.decoder(z)
 
     def encode(self, x : jnp.array, key : jax.Array) -> jnp.array :
         """Encodes an input and samples a latent vector from the posterior.
@@ -203,11 +215,11 @@ class ClassicVAE(nnx.Module):
         Returns:
             jnp.ndarray: Bernoulli sample from the decoded output probabilities.
         """
-        mu, log_sigma = self.encoder(x)
+        mu, logvar = self.encoder(x)
         key1, key2 = jr.split(key)
-        z = mu + jnp.exp(log_sigma) * jr.normal(key1, shape=(self.latent_dim,))
+        z = mu + jnp.exp(0.5 * logvar) * jr.normal(key1, shape=(self.latent_dim,))
         ps = self.decoder(z)
-        return jr.bernoulli(key2, ps)
+        return self.decoder(z)
         
 
 
